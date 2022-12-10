@@ -5,18 +5,26 @@
 #include <WiFiManager.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <CapacitiveSensor.h>
 #include <settings.h>
 
+#define DEBUG true // Increases serial output
 #define SSID "Sam <3 Pea"
+#define MEASURE_SENSOR false // Use to find value for CAPACITIVE_THRESHOLD
+#define CAPACITIVE_THRESHOLD 25
+
+#define SENSOR_WIRE D6 // Pin for the capacitive sensor
+#define RESISTOR    D7 // Pin for other end of the 100k resistor
+#define OUTPUT_WIRE D5 // Pin for the output "touch" wire to main board
 
 const int lampNumber = 0;
-const int minPressInterval = 1000; // Minimum time that must pass between button presses, in milliseconds
-const int buttonPin = D0; // Pin where the button is connected
 const char* host = "http://192.168.20.10:8000"; // HTTP + host + port
 
+const int minPressInterval = 1000; // Minimum time that must pass between button presses, in milliseconds
 int buttonState = 0; // Variable to store the button state
 int changeColour = 0; // Variable to store whether simulateButtonPress needs to trigger
 unsigned long lastPressTime = 0; // Variable to store the time of the last button press
+CapacitiveSensor buttonSensor = CapacitiveSensor(RESISTOR, SENSOR_WIRE); // 100k resistor between GPIO12 & 13
 
 const int minRequestInterval = 2000; // Minimum time that must pass between API requests, in milliseconds
 unsigned long lastRequestTime = 0; // Variable to store the time of the last API request
@@ -32,15 +40,19 @@ unsigned long getTime() {
   return now;
 }
 
-// Function to simulate a button press on the specified pin
+// Function to simulate a button press to the main board
 void simulateButtonPress() {
-  pinMode(buttonPin, OUTPUT); // Set the button pin as an output
-  digitalWrite(buttonPin, HIGH);
+  pinMode(OUTPUT_WIRE, OUTPUT); // Set the button pin as an output
+  digitalWrite(OUTPUT_WIRE, HIGH);
   delay(100);
-  digitalWrite(buttonPin, LOW);
-  pinMode(buttonPin, INPUT); // Set button back to input
+  digitalWrite(OUTPUT_WIRE, LOW);
+  if (DEBUG) {
+    Serial.println("Tapped the internal button!");
+  }
+  pinMode(OUTPUT_WIRE, INPUT); // Set the button pin as an output
 }
 
+// Function to notify the server we changed colours
 void notifyChange() {
   HTTPClient http;
   http.begin(wifiClient, String(host) + "/lamp/" + String(lampNumber));
@@ -54,18 +66,44 @@ void notifyChange() {
   }
 }
 
+// Function to test the sensor in order to set CAPACITIVE_THRESHOLD
+void measureCapacitive() {
+  long start = millis();
+  long total1 =  buttonSensor.capacitiveSensor(30);
+
+  Serial.print(millis() - start);
+  Serial.print("\t");
+  Serial.print(total1);
+  Serial.print("\n");
+
+  delay(100);
+}
+
+// Function to read the value of the capacitive sensor
+int readButton() {
+  long value = buttonSensor.capacitiveSensor(30);
+  if (value >= CAPACITIVE_THRESHOLD) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   WiFiManager wifiManager;
   wifiManager.autoConnect(SSID);
  
   Serial.println("WiFi Connected!"); // If you get here you have connected to the WiFi
-  pinMode(buttonPin, INPUT); // Set the button pin as an input
 }
 
 void loop() {
-  buttonState = digitalRead(buttonPin); // Read the button state
+  buttonState = readButton(); // Read the button state
   unsigned long currentTime = millis(); // Keep track of time
+
+  if (MEASURE_SENSOR) {
+    measureCapacitive();
+  }
 
   if (buttonState == HIGH) { // Check if the button is pressed
     if (currentTime - lastPressTime >= minPressInterval) { // Prevent quick taps
@@ -75,6 +113,7 @@ void loop() {
       int httpCode = http.POST("");
 
       if (httpCode == HTTP_CODE_OK) { // Check for successful response
+        simulateButtonPress(); // we do this here so it's obvious to the user if the lamp isn't working!
         Serial.println("Told the server we're changing colours.");
       } else {
         Serial.println("Error telling server we're changing colours.");
