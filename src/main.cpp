@@ -8,29 +8,22 @@
 #include <CapacitiveSensor.h>
 #include <settings.h>
 
-#define DEBUG true // Increases serial output
-#define SSID "Sam <3 Pea"
-#define MEASURE_SENSOR false // Use to find value for CAPACITIVE_THRESHOLD
-#define CAPACITIVE_THRESHOLD 25
-
-#define SENSOR_WIRE D6 // Pin for the capacitive sensor
-#define RESISTOR    D7 // Pin for other end of the 100k resistor
-#define OUTPUT_WIRE D5 // Pin for the output "touch" wire to main board
-
-const int lampNumber = 0;
-const char* host = "http://192.168.20.10:8000"; // HTTP + host + port
-
-const int minPressInterval = 1000; // Minimum time that must pass between button presses, in milliseconds
 int buttonState = 0; // Variable to store the button state
 int changeColour = 0; // Variable to store whether simulateButtonPress needs to trigger
 unsigned long lastPressTime = 0; // Variable to store the time of the last button press
 CapacitiveSensor buttonSensor = CapacitiveSensor(RESISTOR, SENSOR_WIRE); // 100k resistor between GPIO12 & 13
 
-const int minRequestInterval = 2000; // Minimum time that must pass between API requests, in milliseconds
+#ifdef PRODUCTION
+const int minPressInterval = 2000; // Time that must pass between button presses, in milliseconds
+const int minRequestInterval = 5000; // Time between asking if we need to change colour, in milliseconds
+#elif
+const int minPressInterval = 1000;
+const int minRequestInterval = 2000;
+#endif
 unsigned long lastRequestTime = 0; // Variable to store the time of the last API request
 
 WiFiUDP ntpUDP; // Define NTP Client
-NTPClient timeClient(ntpUDP, "pool.ntp.org");
+NTPClient timeClient(ntpUDP, NTP_SERVER);
 WiFiClient wifiClient; // Needed for HTTP requests
 
 // Function that gets current epoch time
