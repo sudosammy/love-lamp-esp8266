@@ -13,14 +13,17 @@ int changeColour = 0; // Variable to store whether simulateButtonPress needs to 
 unsigned long lastPressTime = 0; // Variable to store the time of the last button press
 CapacitiveSensor buttonSensor = CapacitiveSensor(RESISTOR, SENSOR_WIRE); // 100k resistor between GPIO12 & 13
 
-#ifdef PRODUCTION
+#if PRODUCTION
 const int minPressInterval = 2000; // Time that must pass between button presses, in milliseconds
 const int minRequestInterval = 5000; // Time between asking if we need to change colour, in milliseconds
-#elif
+const int shutdownLoop = (60000/minRequestInterval)*60*4; // If there's been no change to our colour in 2880 loops (4 hours), shutdown.
+#else
 const int minPressInterval = 1000;
 const int minRequestInterval = 2000;
+const int shutdownLoop = 30;
 #endif
 unsigned long lastRequestTime = 0; // Variable to store the time of the last API request
+int loopNumber = 0; // Variable to store number of loops so we know when to sleep
 
 WiFiUDP ntpUDP; // Define NTP Client
 NTPClient timeClient(ntpUDP, NTP_SERVER);
@@ -34,10 +37,10 @@ unsigned long getTime() {
 }
 
 // Function to simulate a button press to the main board
-void simulateButtonPress() {
+void simulateButtonPress(int time) {
   pinMode(OUTPUT_WIRE, OUTPUT); // Set the button pin as an output
   digitalWrite(OUTPUT_WIRE, HIGH);
-  delay(100);
+  delay(time);
   digitalWrite(OUTPUT_WIRE, LOW);
   if (DEBUG) {
     Serial.println("Tapped the internal button!");
@@ -98,6 +101,12 @@ void loop() {
     measureCapacitive();
   }
 
+  if (loopNumber >= shutdownLoop) {
+    simulateButtonPress(3500); // Turn lamp off.
+    Serial.println("Lamp turned off, entering deep sleep now.");
+    ESP.deepSleep(0);
+  }
+
   if (buttonState == HIGH) { // Check if the button is pressed
     if (currentTime - lastPressTime >= minPressInterval) { // Prevent quick taps
       HTTPClient http;
@@ -106,8 +115,9 @@ void loop() {
       int httpCode = http.POST("");
 
       if (httpCode == HTTP_CODE_OK) { // Check for successful response
-        simulateButtonPress(); // we do this here so it's obvious to the user if the lamp isn't working!
+        simulateButtonPress(100); // we do this here so it's obvious to the user if the lamp isn't working!
         Serial.println("Told the server we're changing colours.");
+        loopNumber = 0; // Reset loop timer
       } else {
         Serial.println("Error telling server we're changing colours.");
       }
@@ -126,10 +136,12 @@ void loop() {
 
       if (payload == "1") { // I need to change colour!
         Serial.println("Changing colour.");
-        simulateButtonPress(); // press button
+        simulateButtonPress(100); // press button
         notifyChange(); // notify server of colour change
+        loopNumber = 0; // Reset loop timer
       } else {
         Serial.println("Checked with server, no change needed.");
+        loopNumber++; // Increment loop number each time we're told no change is necessary
       }
     } else {
       Serial.println("Error checking status with server");
